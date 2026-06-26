@@ -1,0 +1,250 @@
+import logging
+import threading
+import time
+
+import cv2
+from ultralytics import YOLO
+
+from behavior.patrol import SmartPatrol
+from behavior.tracking import AutoTracker
+from config import settings
+from core.metrics import RuntimeMetrics
+from services.target_manager import TargetManager
+
+logger = logging.getLogger("crane.brain")
+
+
+class SecurityBrain:
+    """
+    YOLO detection plus patrol/tracking behavior.
+
+    A3 cleanup: removed 7 property pairs that proxied _panning/_zoom_state/
+    _is_resetting/_reset_start_time/_patrol_state from inner tracker/patrol
+    objects. They were migration debt — no caller in the codebase used them.
+    Also removed the PAN_SPEED_GAIN/etc class attributes (legacy re-exports
+    of AutoTracker constants) and the auto_aim/_force_stop_zoom/_stop_all
+    wrapper methods that just delegated to tracker. If you need tracker
+    state, access brain.tracker.* directly.
+    """
+
+    def __init__(self, ptz_controller, state_machine=None, events=None, metrics=None, trace=None, config=None):
+        cfg = config or settings.vision
+        self.model = YOLO(cfg.yolo_model)
+        self._detect_classes = cfg.detect_classes
+        self.ptz = ptz_controller
+        self.state_machine = state_machine
+        self.events = events
+        self.metrics = metrics
+        self.trace = trace
+        self.last_frame = None
+        self.target_manager = TargetManager()
+        self.tracker = AutoTracker(ptz_controller, trace=trace)
+        self.patrol = SmartPatrol(ptz_controller, self.tracker)
+        self._target_visible = False
+
+    def process_frame(self, frame):
+        frame_height, frame_width = frame.shape[:2]
+        results = self.model.track(frame, persist=True, verbose=False, classes=self._detect_classes)
+
+        # Stage: YOLO → target_manager. Record box count and group target.
+        try:
+            boxes_obj = results[0].boxes
+            yolo_count = 0 if boxes_obj.id is None else len(boxes_obj.id)
+        except Exception:
+            yolo_count = -1
+        if self.trace:
+            self.trace.record("yolo", boxes=yolo_count)
+
+        target = self.target_manager.get_group_target(results)
+        if self.trace:
+            if target is None:
+                self.trace.record("target", target=None)
+            else:
+                cx, cy = target.center
+                self.trace.record(
+                    "target",
+                    target="group",
+                    cx=round(float(cx), 1),
+                    cy=round(float(cy), 1),
+                    height=int(target.height),
+                    frame_w=int(frame_width),
+                    frame_h=int(frame_height),
+                )
+
+        if target is not None:
+            if self.metrics:
+                self.metrics.detected()
+            if self.events and not self._target_visible:
+                self.events.emit("target_detected")
+            self._target_visible = True
+
+            if self.patrol.is_active:
+                self.ptz.stop()
+                self.patrol.reset()
+                self.tracker.reset()
+
+            if self.state_machine:
+                self.state_machine.enter_tracking()
+
+            cx, cy = target.center
+            logger.debug(
+                "track: target cx=%.1f cy=%.1f h=%d frame=%dx%d",
+                cx, cy, target.height, frame_width, frame_height,
+            )
+            self.tracker.auto_aim(cx, cy, target.height, frame_width, frame_height)
+            self.target_manager.annotate(frame, target)
+        else:
+            if self._target_visible:
+                self.ptz.stop()
+                if self.events:
+                    self.events.emit("target_lost")
+            self._target_visible = False
+            if self.state_machine:
+                self.state_machine.enter_patrol()
+            self.patrol.handle_no_object()
+
+        self.last_frame = frame
+        return frame
+
+
+class VisionRuntime:
+    def __init__(self, camera, brain, ptz, state_machine, events, metrics,
+                 frame_skip_rate=None, trace=None, config=None):
+        cfg = config or settings.vision
+        web_cfg = settings.web
+        self.camera = camera
+        self.brain = brain
+        self.ptz = ptz
+        self.state_machine = state_machine
+        self.frame_skip_rate = (
+            frame_skip_rate if frame_skip_rate is not None else cfg.frame_skip_rate
+        )
+        self._jpeg_quality = cfg.jpeg_quality
+        self._loop_sleep = web_cfg.loop_sleep
+        self._no_frame_sleep = web_cfg.no_frame_sleep
+        self._stream_sleep = web_cfg.stream_sleep
+        # B3: soft manual override — auto-return to PATROL after timeout
+        self._manual_override_timeout = settings.operator.manual_override_timeout
+        self._last_manual_command_time = None  # monotonic timestamp
+        self.events = events
+        self.metrics = metrics or RuntimeMetrics()
+        self.trace = trace
+        self._display_lock = threading.Lock()
+        self._display_jpeg = None
+        self._processing_running = False
+        self._thread = None
+
+    @property
+    def auto_guard_enabled(self):
+        return self.state_machine.auto_guard_enabled
+
+    def start(self):
+        self.camera.start()
+        self._processing_running = True
+        self._thread = threading.Thread(target=self._processing_loop, daemon=True)
+        self._thread.start()
+
+    def stop(self):
+        self._processing_running = False
+        self.camera.stop()
+        self.state_machine.disable_auto_guard()
+
+    def _processing_loop(self):
+        frame_count = 0
+        while self._processing_running:
+            frame = self.camera.get_frame()
+            if frame is None:
+                time.sleep(self._no_frame_sleep)
+                continue
+
+            # B3: проверяем, не истекло ли время soft manual override
+            self._check_manual_override_timeout()
+
+            self.metrics.seen_frame()
+
+            if self.auto_guard_enabled:
+                frame_count += 1
+                if frame_count % self.frame_skip_rate == 0:
+                    frame = self.brain.process_frame(frame)
+                    self.metrics.processed_frame()
+            else:
+                frame_count = 0
+
+            ok, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, self._jpeg_quality])
+            if ok:
+                with self._display_lock:
+                    self._display_jpeg = buffer.tobytes()
+                self.metrics.encoded_frame()
+            time.sleep(self._loop_sleep)
+
+    def _check_manual_override_timeout(self):
+        """B3: если находимся в MANUAL режиме и timeout истёк — возвращаемся в PATROL.
+
+        Логика:
+          - Если _manual_override_timeout == 0 — soft override отключён (legacy behavior)
+          - Если _last_manual_command_time is None — не в manual режиме
+          - Если time.monotonic() - _last_manual_command_time > timeout → enable auto_guard
+        """
+        if self._manual_override_timeout <= 0:
+            return  # soft override отключён
+        if self._last_manual_command_time is None:
+            return  # не в manual режиме
+        if self.state_machine.mode.value != "MANUAL":
+            return  # уже не в manual
+        elapsed = time.monotonic() - self._last_manual_command_time
+        if elapsed >= self._manual_override_timeout:
+            # Timeout истёк — возвращаемся в PATROL
+            if self.events:
+                self.events.emit("manual_override_expired", f"after_{self._manual_override_timeout}s")
+            self.state_machine.enable_auto_guard()
+            self._last_manual_command_time = None
+
+    def mjpeg_generator(self):
+        while True:
+            with self._display_lock:
+                frame = self._display_jpeg
+            if frame is not None:
+                yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            time.sleep(self._stream_sleep)
+
+    def status(self):
+        return {
+            "camera_status": self.camera.status,
+            "auto_guard": self.auto_guard_enabled,
+            "mode": self.state_machine.mode.value,
+            "metrics": self.metrics.snapshot(),
+            "events": self.events.recent() if self.events else [],
+            "tracking_trace": self.trace.snapshot() if self.trace else None,
+            "connection_health": {
+                "rtsp": self.camera.health(),
+                "ptz": self.ptz.health(),
+            },
+        }
+
+    def manual_override(self):
+        """B3: Soft manual override.
+
+        Вместо того чтобы навсегда отключать auto-guard, переводим state_machine
+        в MANUAL и запоминаем время. Processing loop проверяет periodically —
+        если _manual_override_timeout секунд не было новых ручных команд,
+        auto-guard автоматически включается снова.
+
+        Любой новый вызов manual_override() продлевает timeout.
+        """
+        if self.auto_guard_enabled:
+            self.state_machine.disable_auto_guard()
+            self.ptz.stop()
+        self.state_machine.enter_manual()
+        # Запоминаем/продлеваем время последней ручной команды
+        self._last_manual_command_time = time.monotonic()
+        if self.events:
+            self.events.emit("manual_override", "soft")
+
+    def toggle_guard(self):
+        if self.auto_guard_enabled:
+            self.state_machine.disable_auto_guard()
+            self.ptz.stop()
+            return "off"
+
+        self.state_machine.enable_auto_guard()
+        return "on"
