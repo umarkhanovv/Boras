@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+ai_env/
+.venv/
+env/
+ENV/
+
+# Environment variables and secrets
+.env
+.env.venv/
+config_local.py
+
+# YOLO weights (large, downloaded automatically)
+*.pt
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Temp install files from zips
+INSTALL.md
+boras_*/
