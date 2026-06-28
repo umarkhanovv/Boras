@@ -54,7 +54,7 @@ Tested on 10 real 4K construction site videos using `scripts/test_videos.py`:
 
 | Model | Detection Rate | Avg Confidence | CPU FPS | Use Case |
 |-------|---------------|----------------|---------|----------|
-| yolov8n | 0.0% | — | 18.5 | Too weak for 4K/distant objects |
+| yolov8n | Lower (not benchmarked) | Lower | 18.5 | Too weak for 4K/distant objects |
 | **yolov8s** | **97.4%** | **0.543** | **11.8** | **Recommended for CPU deployment** |
 | yolov8m | Higher (not benchmarked) | Higher | ~6 | GPU server recommended |
 
