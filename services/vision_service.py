@@ -207,6 +207,15 @@ class VisionRuntime:
                 yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
             time.sleep(self._stream_sleep)
 
+    def get_snapshot(self) -> bytes:
+        """Return the latest encoded JPEG frame as bytes (or empty bytes if none).
+
+        Used by NotificationService to attach a photo to Telegram alerts.
+        Thread-safe — uses the same _display_lock as mjpeg_generator.
+        """
+        with self._display_lock:
+            return self._display_jpeg or b""
+
     def status(self):
         return {
             "camera_status": self.camera.status,

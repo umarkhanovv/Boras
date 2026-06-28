@@ -25,10 +25,11 @@ trace = _components["trace"]
 state_machine = _components["state_machine"]
 camera = _components["camera"]
 ptz = _components["ptz"]
-lights = _components["lights"]
 brain = _components["brain"]
 runtime = _components["runtime"]
 operator = _components["operator"]
+notifications = _components["notifications"]
+event_store = _components["event_store"]
 
 _security = HTTPBasic()
 
@@ -48,7 +49,9 @@ def require_auth(credentials: HTTPBasicCredentials = Depends(_security)):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     runtime.start()
+    notifications.start()
     yield
+    notifications.stop()
     runtime.stop()
 
 
@@ -70,6 +73,36 @@ def get_status():
     return runtime.status()
 
 
+@app.get("/api/history")
+def get_history(limit: int = 100, name: str = None):
+    """SQLite-backed event history. Survives server restarts.
+
+    Query params:
+        limit: number of events to return (default 100, max 1000)
+        name:  filter by event name (e.g. "target_detected")
+    """
+    limit = max(1, min(limit, 1000))
+    events = event_store.get_recent(limit=limit, name_filter=name)
+    return {
+        "total": event_store.count(name_filter=name),
+        "returned": len(events),
+        "events": events,
+    }
+
+
+@app.delete("/api/history")
+def clear_history():
+    """Delete all event history. Use with caution."""
+    deleted = event_store.clear()
+    return {"deleted": deleted}
+
+
+@app.get("/history")
+def history_page():
+    """Web UI for browsing event history."""
+    return FileResponse("history.html")
+
+
 @app.get("/api/move")
 def manual_move(direction: str):
     # Delegate to OperatorService for consistent manual command handling
@@ -88,12 +121,6 @@ def manual_focus(direction: str):
     return operator.focus(direction)
 
 
-
-
-@app.post("/api/lights")
-def set_lights(mode: str, brightness: int = 100):
-    # Delegate to OperatorService for consistent lighting control
-    return operator.set_lights(mode, brightness)
 
 
 @app.post("/api/toggle_guard")

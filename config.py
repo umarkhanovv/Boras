@@ -141,10 +141,34 @@ class OperatorConfig:
 
 
 @dataclass
+class NotificationConfig:
+    """Notifications via external providers (Telegram, etc.).
+    Set enabled=False to disable all notifications.
+    Telegram requires both token and chat_id to be set.
+    """
+    enabled: bool = False                  # master switch
+    # Telegram bot token from @BotFather (e.g. "123456:ABC-DEF...")
+    telegram_token: str = ""
+    # Telegram chat ID to send messages to (e.g. "123456789" for private chat)
+    telegram_chat_id: str = ""
+    # Minimum seconds between notifications (rate limit, prevents spam)
+    rate_limit_seconds: float = 30.0
+    # How often NotificationService polls EventLog for new events (seconds)
+    poll_interval: float = 2.0
+    # Which event names trigger a notification
+    notify_on: tuple = (
+        "target_detected",   # PATROL → TRACKING transition
+        "target_lost",       # TRACKING → PATROL transition
+        "error",             # any system error
+        "disconnected",      # RTSP stream lost
+    )
+
+
+@dataclass
 class Settings:
     """Top-level settings container. Access sections via settings.camera,
     settings.ptz, settings.vision, settings.tracking, settings.patrol, settings.web,
-    settings.operator.
+    settings.operator, settings.notifications.
     """
     camera: CameraConfig = field(default_factory=CameraConfig)
     ptz: PTZConfig = field(default_factory=PTZConfig)
@@ -153,6 +177,7 @@ class Settings:
     patrol: PatrolConfig = field(default_factory=PatrolConfig)
     web: WebConfig = field(default_factory=WebConfig)
     operator: OperatorConfig = field(default_factory=OperatorConfig)
+    notifications: NotificationConfig = field(default_factory=NotificationConfig)
 
 
 # Singleton instance — import this everywhere as `from config import settings`
@@ -185,3 +210,18 @@ settings.ptz.min_command_interval = _env_float("CRANE_MIN_COMMAND_INTERVAL", set
 settings.tracking.pan_speed_gain = _env_float("CRANE_PAN_SPEED_GAIN", settings.tracking.pan_speed_gain)
 settings.tracking.min_pan_speed = _env_float("CRANE_MIN_PAN_SPEED", settings.tracking.min_pan_speed)
 settings.operator.manual_override_timeout = _env_float("CRANE_MANUAL_OVERRIDE_TIMEOUT", settings.operator.manual_override_timeout)
+
+# Notifications — Telegram alerts
+_tg_token = os.environ.get("CRANE_TELEGRAM_TOKEN", "")
+_tg_chat_id = os.environ.get("CRANE_TELEGRAM_CHAT_ID", "")
+if _tg_token:
+    settings.notifications.telegram_token = _tg_token
+if _tg_chat_id:
+    settings.notifications.telegram_chat_id = _tg_chat_id
+# Auto-enable notifications if both token and chat_id are set via env
+if _tg_token and _tg_chat_id:
+    settings.notifications.enabled = True
+# Allow explicit enable/disable override
+_tg_enabled = os.environ.get("CRANE_NOTIFICATIONS_ENABLED")
+if _tg_enabled is not None:
+    settings.notifications.enabled = _tg_enabled.lower() in ("1", "true", "yes", "on")

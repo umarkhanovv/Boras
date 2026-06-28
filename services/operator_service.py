@@ -1,22 +1,13 @@
-from fastapi import HTTPException, status
-
-
-LIGHT_MODE_MAP = {
-    "infrared": "InfraRed",
-    "ir": "InfraRed",
-    "variablewhitelight": "WhiteLight",
-    "whitelight": "WhiteLight",
-    "white": "WhiteLight",
-    "color": "WhiteLight",
-    "auto": "Auto",
-}
-
-
 class OperatorService:
-    def __init__(self, runtime, ptz, lights, logger):
+    """Manual operator commands: move/zoom/focus + guard toggle.
+
+    Lights functionality was removed — the camera has its own light sensors
+    and manages IR/White light automatically.
+    """
+
+    def __init__(self, runtime, ptz, logger):
         self.runtime = runtime
         self.ptz = ptz
-        self.lights = lights
         self.logger = logger
 
     def move(self, direction):
@@ -44,30 +35,6 @@ class OperatorService:
             "stop": self.ptz.stop_focus,
         }
         return self._run_manual_command("focus", direction, commands)
-
-    def set_lights(self, mode, brightness=100):
-        target_mode = LIGHT_MODE_MAP.get(mode.lower())
-        if target_mode is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Unknown light mode '{mode}'. Valid modes: {sorted(LIGHT_MODE_MAP)}",
-            )
-
-        if not 0 <= brightness <= 100:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="brightness must be between 0 and 100",
-            )
-
-        self.logger.info("Lighting map: from '%s' to camera mode '%s' (brightness: %s)", mode, target_mode, brightness)
-
-        ok = self.lights.set_lighting(target_mode, str(brightness))
-        return {
-            "status": "success" if ok else "error",
-            "requested_mode": mode,
-            "sent_to_camera": target_mode,
-            "brightness": brightness,
-        }
 
     def toggle_guard(self):
         return {"status": self.runtime.toggle_guard()}

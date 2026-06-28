@@ -10,7 +10,6 @@ from services.camera_service import CameraStream
 from services.ptz_service import CranePTZ
 from services.vision_service import SecurityBrain, VisionRuntime
 from services.operator_service import OperatorService
-from lights import CraneLightsFull
 
 
 @pytest.fixture(scope="module")
@@ -25,8 +24,9 @@ class TestComposeAppReturnsAllComponents:
 
     def test_returns_dict_with_all_keys(self, components):
         expected_keys = {
-            "events", "metrics", "trace", "state_machine",
-            "camera", "ptz", "lights", "brain", "runtime", "operator",
+            "events", "metrics", "trace", "event_store",
+            "state_machine", "camera", "ptz", "brain", "runtime",
+            "operator", "notifications",
         }
         assert set(components.keys()) == expected_keys
 
@@ -47,9 +47,6 @@ class TestComposeAppReturnsAllComponents:
 
     def test_ptz_is_crane_ptz(self, components):
         assert isinstance(components["ptz"], CranePTZ)
-
-    def test_lights_is_crane_lights(self, components):
-        assert isinstance(components["lights"], CraneLightsFull)
 
     def test_brain_is_security_brain(self, components):
         assert isinstance(components["brain"], SecurityBrain)
@@ -99,10 +96,9 @@ class TestComposeAppWiring:
         assert components["runtime"].camera is components["camera"]
         assert components["runtime"].ptz is components["ptz"]
 
-    def test_operator_uses_same_runtime_ptz_lights(self, components):
+    def test_operator_uses_same_runtime_ptz(self, components):
         assert components["operator"].runtime is components["runtime"]
         assert components["operator"].ptz is components["ptz"]
-        assert components["operator"].lights is components["lights"]
 
 
 class TestComposeAppIsolation:

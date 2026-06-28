@@ -494,24 +494,6 @@
       </div>
     </div>
 
-    <div class="panel">
-      <h3>Lighting</h3>
-      <div class="light-row">
-        <button class="light-btn white" id="lightWhite" type="button">
-          <span class="ico">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><line x1="12" y1="2" x2="12" y2="5"/><line x1="12" y1="19" x2="12" y2="22"/><line x1="2" y1="12" x2="5" y2="12"/><line x1="19" y1="12" x2="22" y2="12"/><line x1="4.5" y1="4.5" x2="6.5" y2="6.5"/><line x1="17.5" y1="17.5" x2="19.5" y2="19.5"/><line x1="4.5" y1="19.5" x2="6.5" y2="17.5"/><line x1="17.5" y1="6.5" x2="19.5" y2="4.5"/></svg>
-          </span>
-          <span>White Light</span>
-        </button>
-        <button class="light-btn ir" id="lightIR" type="button">
-          <span class="ico">
-            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1"/><path d="M9 9a4 4 0 0 0 0 6"/><path d="M15 9a4 4 0 0 1 0 6"/></svg>
-          </span>
-          <span>Infra Red</span>
-        </button>
-      </div>
-    </div>
-
   </div>
 
   <footer>by Umarkhanov Askhat</footer>
@@ -760,32 +742,6 @@
   guardSwitch.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleGuard(); }
   });
-
-  // ===== Lighting (two-button toggle) =====
-  const lightWhiteBtn = $('lightWhite');
-  const lightIRBtn = $('lightIR');
-  let activeLight = null;
-
-  async function setLight(mode, which){
-    const btn = which === 'white' ? lightWhiteBtn : lightIRBtn;
-    const other = which === 'white' ? lightIRBtn : lightWhiteBtn;
-    btn.classList.add('holding');
-    try{
-      const res = await fetch(`/api/lights?mode=${mode}&brightness=100`, { method: 'POST' });
-      const data = await res.json();
-      if (data.status === 'success'){
-        activeLight = which;
-        btn.classList.add('active');
-        other.classList.remove('active');
-      }
-    } catch(e){}
-    finally{
-      btn.classList.remove('holding');
-    }
-  }
-
-  lightWhiteBtn.addEventListener('click', () => setLight('variablewhitelight', 'white'));
-  lightIRBtn.addEventListener('click',    () => setLight('infrared', 'ir'));
 
   // ===== Keyboard shortcuts (no animation — used hundreds of times) =====
   // Per the design framework: never animate keyboard-initiated actions.

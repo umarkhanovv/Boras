@@ -14,6 +14,13 @@
 set -e
 cd "$(dirname "$0")/.."
 
+# Test credentials — needed because config.py validates that creds are set.
+# These are FAKE credentials for CI only — never use in production.
+export CRANE_CAMERA_IP="${CRANE_CAMERA_IP:-10.0.0.1}"
+export CRANE_CAMERA_USER="${CRANE_CAMERA_USER:-test_user}"
+export CRANE_CAMERA_PASS="${CRANE_CAMERA_PASS:-test_pass}"
+export CRANE_API_TOKEN="${CRANE_API_TOKEN:-test_token_long_enough}"
+
 echo "=== Step 1/3: compileall ==="
 python3 -m compileall -q .
 echo "OK"

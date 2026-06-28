@@ -21,11 +21,12 @@ from typing import Dict, Any
 
 from config import API_TOKEN, CAMERA_IP, CAMERA_PASS, CAMERA_USER, settings
 from core.events import EventLog
+from core.event_store import EventStore
 from core.metrics import RuntimeMetrics
 from core.state_machine import CraneStateMachine
 from core.tracking_trace import TrackingTrace
-from lights import CraneLightsFull
 from services.camera_service import CameraStream
+from services.notification_service import NotificationService
 from services.operator_service import OperatorService
 from services.ptz_service import CranePTZ
 from services.vision_service import SecurityBrain, VisionRuntime
@@ -46,6 +47,9 @@ def compose_app(
     the SAME events/metrics/trace instances — this is the regression fix for
     the Phase 1 bug where they were only passed to VisionRuntime.
 
+    Note: lights functionality was removed — the camera has its own light
+    sensors and manages IR/White light automatically.
+
     Args:
         camera_ip / camera_user / camera_pass / api_token:
             Optional overrides. Defaults come from config module.
@@ -53,8 +57,8 @@ def compose_app(
             Optional Settings instance for testing (overrides the singleton).
 
     Returns:
-        Dict with keys: events, metrics, trace, state_machine, camera, ptz,
-        lights, brain, runtime, operator.
+        Dict with keys: events, metrics, trace, event_store, state_machine,
+        camera, ptz, brain, runtime, operator, notifications.
     """
     cfg = settings_override or settings
     ip = camera_ip or CAMERA_IP
@@ -68,6 +72,11 @@ def compose_app(
     metrics = RuntimeMetrics()
     trace = TrackingTrace()
 
+    # SQLite-backed event store — persists events across server restarts.
+    # Every emit() will now also write to SQLite via this listener.
+    event_store = EventStore(db_path="events.db")
+    events.add_listener(lambda ev: event_store.save(ev.name, ev.detail, ev.created_at))
+
     state_machine = CraneStateMachine(events=events)
     camera = CameraStream(
         ip=ip, username=user, password=password,
@@ -77,7 +86,6 @@ def compose_app(
         ip=ip, username=user, password=password,
         events=events, metrics=metrics, trace=trace,
     )
-    lights = CraneLightsFull(ip=ip, username=user, password=password)
     brain = SecurityBrain(
         ptz, state_machine=state_machine, events=events,
         metrics=metrics, trace=trace,
@@ -91,17 +99,26 @@ def compose_app(
         metrics=metrics,
         trace=trace,
     )
-    operator = OperatorService(runtime, ptz, lights, logger)
+    operator = OperatorService(runtime, ptz, logger)
+
+    # NotificationService — watches events for target_detected/target_lost/error
+    # and sends Telegram alerts (or any other configured provider).
+    # Snapshot provider captures the current JPEG frame for photo alerts.
+    notifications = NotificationService(
+        events=events,
+        snapshot_provider=runtime.get_snapshot,
+    )
 
     return {
         "events": events,
         "metrics": metrics,
         "trace": trace,
+        "event_store": event_store,
         "state_machine": state_machine,
         "camera": camera,
         "ptz": ptz,
-        "lights": lights,
         "brain": brain,
         "runtime": runtime,
         "operator": operator,
+        "notifications": notifications,
     }

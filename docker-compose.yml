@@ -1,0 +1,33 @@
+# docker-compose.yml for Boras AI Security System
+#
+# Usage:
+#   1. Create .env file with your credentials (see .env.example)
+#   2. docker compose up
+#   3. Open http://localhost:8000
+
+services:
+  boras:
+    build: .
+    container_name: boras
+    restart: unless-stopped  # auto-restart on crash, but not on manual stop
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    volumes:
+      # Mount test_videos for video batch testing
+      - ./test_videos:/app/test_videos
+      # Persist YOLO weights across restarts (avoid re-download)
+      - yolov8_weights:/root/.config/Ultralytics
+    networks:
+      - boras_net
+    # Camera IP must be reachable from container's network —
+    # if camera is on host LAN, use network_mode: host (Linux only)
+    # network_mode: host  # uncomment on Linux if camera can't be reached
+
+volumes:
+  yolov8_weights:
+
+networks:
+  boras_net:
+    driver: bridge

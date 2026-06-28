@@ -42,7 +42,7 @@ class TestSettingsStructure:
 
     def test_settings_vision_defaults(self):
         cfg = settings.vision
-        assert cfg.yolo_model == "yolov8n.pt"
+        assert cfg.yolo_model == "yolov8s.pt"
         assert cfg.detect_classes == [0]
         assert cfg.frame_skip_rate == 3
         assert cfg.jpeg_quality == 80

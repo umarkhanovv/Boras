@@ -112,9 +112,6 @@ class TestComponentReferences:
     def test_operator_uses_same_ptz(self, app):
         assert app.operator.ptz is app.ptz
 
-    def test_operator_uses_same_lights(self, app):
-        assert app.operator.lights is app.lights
-
 
 class TestStatusPayloadShape:
     """Гарантируем, что /api/status возвращает ожидаемую структуру."""
@@ -151,7 +148,8 @@ class TestStatusPayloadShape:
     def test_status_metrics_has_expected_counters(self, app):
         status = app.runtime.status()
         metrics = status["metrics"]
-        for key in ("fps", "frames_seen", "frames_processed", "frames_encoded",
+        for key in ("fps", "fps_lifetime_avg", "fps_window_size",
+                    "frames_seen", "frames_processed", "frames_encoded",
                     "detections_count", "ptz_commands", "errors"):
             assert key in metrics, f"Metric {key} missing"
 
