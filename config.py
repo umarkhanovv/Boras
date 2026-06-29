@@ -151,6 +151,8 @@ class NotificationConfig:
     telegram_token: str = ""
     # Telegram chat ID to send messages to (e.g. "123456789" for private chat)
     telegram_chat_id: str = ""
+    # Camera name shown in notification messages
+    camera_name: str = "360 camera"
     # Minimum seconds between notifications (rate limit, prevents spam)
     rate_limit_seconds: float = 30.0
     # How often NotificationService polls EventLog for new events (seconds)

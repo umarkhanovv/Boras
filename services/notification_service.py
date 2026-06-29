@@ -79,8 +79,9 @@ class NotificationService:
             providers.append(TelegramNotificationProvider(
                 token=cfg.telegram_token,
                 chat_id=cfg.telegram_chat_id,
+                camera_name=cfg.camera_name,
             ))
-            logger.info("Telegram notification provider registered")
+            logger.info("Telegram notification provider registered (camera: %s)", cfg.camera_name)
         return providers
 
     def _init_last_seen_ts(self) -> Optional[datetime]:
@@ -173,7 +174,12 @@ class NotificationService:
             self._dispatch_event(ev)
 
     def _dispatch_event(self, raw_event: dict):
-        """Convert raw CraneEvent to NotificationEvent and send to all providers."""
+        """Convert raw CraneEvent to NotificationEvent and send to all providers.
+
+        For target_detected: wait SNAPSHOT_DELAY_SECONDS (default 2.5s) before
+        capturing snapshot — gives PTZ camera time to center on the target so
+        the photo shows the person clearly, not on the edge of frame.
+        """
         name = raw_event["name"]
         if name not in _EVENT_MAP:
             return
@@ -198,18 +204,35 @@ class NotificationService:
         snapshot = None
         # Only attach snapshot for target_detected events (photo of intruder)
         if event_type == "target_detected" and self._snapshot_provider:
+            # Wait for camera to center on target before capturing photo.
+            # Without this, photo is taken at the moment of detection when
+            # person is still on the edge of frame — not useful as evidence.
+            # 4s gives AutoTracker time to pan/tilt to target and stabilize.
+            SNAPSHOT_DELAY = 4.0
+            logger.info("Waiting %.1fs before snapshot (camera centering)...", SNAPSHOT_DELAY)
+            time.sleep(SNAPSHOT_DELAY)
             try:
                 snapshot = self._snapshot_provider()
             except Exception as e:
                 logger.warning("Snapshot capture failed: %s", e)
                 snapshot = None
 
+        # Extract confidence from event detail if present (e.g. "confidence=0.87")
+        confidence_str = ""
+        detail = raw_event.get("detail", "")
+        if "confidence=" in detail:
+            try:
+                confidence_str = detail.split("confidence=")[1].split(",")[0].strip()
+            except (IndexError, ValueError):
+                confidence_str = ""
+
         notification = NotificationEvent(
             event_type=event_type,
             message=message,
-            detail=raw_event.get("detail", ""),
+            detail=detail,
             timestamp=ts,
             snapshot=snapshot,
+            confidence=confidence_str,
         )
 
         # Dispatch to all configured providers

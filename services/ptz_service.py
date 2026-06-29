@@ -392,3 +392,39 @@ class CranePTZ:
         if self._send_ptz_stop(pantilt=True, zoom=True):
             self._record_finished("all")
         self.stop_focus()
+
+    def goto_home(self, pan=0.0, tilt=0.0, zoom=0.0):
+        """Move camera to absolute home position (pan=0, tilt=0, zoom=1x).
+
+        Called when target is lost — returns camera to center before patrol
+        starts, so patrol doesn't begin from a random position the camera
+        ended up in while tracking.
+
+        Uses ONVIF AbsoluteMove operation. Values are in normalized space:
+          pan:  -1.0 (left) to 1.0 (right), 0.0 = center
+          tilt: -1.0 (down) to 1.0 (up), 0.0 = center
+          zoom:  0.0 (wide/1x) to 1.0 (telephoto/max zoom)
+
+        If camera doesn't support AbsoluteMove (returns HTTP 400),
+        error is suppressed — patrol will still work from current position.
+        """
+        # Clear throttle buckets — fresh start after goto_home
+        self._last_sent.clear()
+        home_xml = f"""<?xml version="1.0" encoding="utf-8"?>
+        <s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" xmlns:tptz="http://www.onvif.org/ver20/ptz/wsdl" xmlns:tt="http://www.onvif.org/ver10/schema">
+          <s:Header>{self._build_auth_header()}</s:Header>
+          <s:Body>
+            <tptz:AbsoluteMove>
+              <tptz:ProfileToken>{self.profile}</tptz:ProfileToken>
+              <tptz:Position>
+                <tt:PanTilt x="{pan}" y="{tilt}"/>
+                <tt:Zoom x="{zoom}"/>
+              </tptz:Position>
+            </tptz:AbsoluteMove>
+          </s:Body>
+        </s:Envelope>"""
+        if self._post_ptz(home_xml, force=True, suppress_error=True):
+            if self.events:
+                self.events.emit("move_finished", f"goto_home pan={pan},tilt={tilt},zoom={zoom}")
+            return True
+        return False

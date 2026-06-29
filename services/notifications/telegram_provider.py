@@ -62,7 +62,7 @@ class TelegramNotificationProvider(NotificationProvider):
     API_BASE = "https://api.telegram.org/bot{token}/{method}"
     REQUEST_TIMEOUT = 10.0  # seconds
 
-    def __init__(self, token: str, chat_id: str, camera_name: str = "Boras Security"):
+    def __init__(self, token: str, chat_id: str, camera_name: str = "360 camera"):
         self._token = token
         self._chat_id = chat_id
         self._camera_name = camera_name
@@ -97,13 +97,22 @@ class TelegramNotificationProvider(NotificationProvider):
         # Format time in local timezone (Telegram clients display as-is)
         local_ts = event.timestamp.astimezone()
         time_str = local_ts.strftime("%H:%M:%S")
+        date_str = local_ts.strftime("%d.%m.%Y")
 
         lines = [
             f"{emoji} {title}",
             f"Камера: {self._camera_name}",
+            f"Дата: {date_str}",
             f"Время: {time_str}",
         ]
-        if event.detail:
+        # Add confidence for target_detected events
+        if event.event_type == "target_detected" and event.confidence:
+            try:
+                conf_pct = float(event.confidence) * 100
+                lines.append(f"Уверенность: {conf_pct:.0f}%")
+            except (ValueError, TypeError):
+                lines.append(f"Уверенность: {event.confidence}")
+        if event.detail and "confidence=" not in event.detail:
             lines.append(f"Детали: {event.detail}")
         return "\n".join(lines)
 

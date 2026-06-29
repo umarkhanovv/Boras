@@ -42,6 +42,15 @@ class SmartPatrol:
             self._reset_start_time = time.monotonic()
             self.ptz.stop()
             self.tracker.reset()
+            # Return camera to home position (pan=0, tilt=0, zoom=1x) so patrol
+            # doesn't start from a random position the camera ended up in while
+            # tracking (e.g. looking down at the floor). Best-effort — if camera
+            # doesn't support AbsoluteMove, silently continue.
+            if hasattr(self.ptz, "goto_home"):
+                try:
+                    self.ptz.goto_home()
+                except Exception:
+                    pass  # never let goto_home break patrol
             self._patrol_state = "init"
 
         elapsed = time.monotonic() - self._reset_start_time

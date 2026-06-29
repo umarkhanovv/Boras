@@ -61,7 +61,14 @@ class EventStore:
             logger.error("EventStore init failed: %s", e)
 
     def save(self, name: str, detail: str = "", created_at: Optional[datetime] = None):
-        """Insert a single event. Non-blocking on failure — never break pipeline."""
+        """Insert a single event. Non-blocking on failure — never break pipeline.
+
+        Filters out high-frequency events that would flood the database:
+        frame_received fires ~20x/second and is useless for audit logs.
+        """
+        # Don't persist high-frequency noise events
+        if name in ("frame_received",):
+            return
         if created_at is None:
             created_at = datetime.now(timezone.utc)
         ts = created_at.isoformat()

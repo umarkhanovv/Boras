@@ -75,7 +75,17 @@ class SecurityBrain:
             if self.metrics:
                 self.metrics.detected()
             if self.events and not self._target_visible:
-                self.events.emit("target_detected")
+                # Extract confidence from YOLO results for notification
+                try:
+                    boxes = results[0].boxes
+                    if boxes is not None and hasattr(boxes, 'conf') and boxes.conf is not None:
+                        confs = boxes.conf.cpu().numpy()
+                        avg_conf = float(confs.mean()) if len(confs) > 0 else 0.0
+                    else:
+                        avg_conf = 0.0
+                except Exception:
+                    avg_conf = 0.0
+                self.events.emit("target_detected", f"confidence={avg_conf:.2f}")
             self._target_visible = True
 
             if self.patrol.is_active:
@@ -193,9 +203,15 @@ class VisionRuntime:
             return  # уже не в manual
         elapsed = time.monotonic() - self._last_manual_command_time
         if elapsed >= self._manual_override_timeout:
-            # Timeout истёк — возвращаемся в PATROL
+            # Timeout истёк — возвращаемся в home position, потом в PATROL
             if self.events:
                 self.events.emit("manual_override_expired", f"after_{self._manual_override_timeout}s")
+            # Return camera to home so patrol/tracking doesn't start from manual position
+            if hasattr(self.ptz, "goto_home"):
+                try:
+                    self.ptz.goto_home()
+                except Exception:
+                    pass
             self.state_machine.enable_auto_guard()
             self._last_manual_command_time = None
 
@@ -255,5 +271,12 @@ class VisionRuntime:
             self.ptz.stop()
             return "off"
 
+        # Enabling auto-guard: return camera to home position first so patrol
+        # doesn't start from wherever the operator left it pointing.
+        if hasattr(self.ptz, "goto_home"):
+            try:
+                self.ptz.goto_home()
+            except Exception:
+                pass
         self.state_machine.enable_auto_guard()
         return "on"

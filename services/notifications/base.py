@@ -23,12 +23,14 @@ class NotificationEvent:
         detail:     extra context (HTTP status, error class, etc.).
         timestamp:  when the underlying CraneEvent was emitted.
         snapshot:   optional JPEG bytes of the current frame, for photo alerts.
+        confidence: optional detection confidence string ("0.87") for target_detected.
     """
     event_type: str
     message: str
     detail: str = ""
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     snapshot: Optional[bytes] = None
+    confidence: str = ""
 
 
 class NotificationProvider(abc.ABC):

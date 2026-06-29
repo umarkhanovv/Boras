@@ -388,8 +388,24 @@ class TestNotificationServiceStartupSkipsOldEvents:
 
 
 class TestNotificationServiceSnapshot:
-    def test_snapshot_attached_to_target_detected(self, events_log, fake_provider):
-        """При target_detected — вызывается snapshot_provider и прикрепляется к event."""
+    def test_snapshot_attached_to_target_detected(self, events_log, fake_provider, monkeypatch):
+        """При target_detected — вызывается snapshot_provider и прикрепляется к event.
+        Monkeypatch time.sleep в notification_service чтобы пропустить 2.5s snapshot delay."""
+        # Replace only notification_service's time.sleep to skip the 2.5s snapshot delay.
+        # We can't replace all time.sleep because poll_interval also uses it.
+        import services.notification_service as ns_module
+
+        real_sleep = ns_module.time.sleep
+
+        def fast_sleep(seconds):
+            # Skip only long sleeps (the 2.5s snapshot delay); keep short ones (poll)
+            if seconds >= 2.0:
+                real_sleep(0.01)
+            else:
+                real_sleep(seconds)
+
+        monkeypatch.setattr(ns_module.time, "sleep", fast_sleep)
+
         snapshot_calls = []
         def snapshot_provider():
             snapshot_calls.append(True)
@@ -409,7 +425,8 @@ class TestNotificationServiceSnapshot:
         svc.start()
         try:
             events_log.emit("target_detected", "")
-            time.sleep(0.3)
+            # Wait enough for: poll (0.05) + fast_sleep(0.01) + snapshot + send
+            real_sleep(0.5)
             assert len(fake_provider.sent) == 1
             assert snapshot_calls == [True]
             assert fake_provider.sent[0].snapshot == b"fake_jpeg"

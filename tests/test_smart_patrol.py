@@ -51,7 +51,7 @@ class TestHandleNoObjectInit:
     def test_first_call_sets_resetting_and_stops_ptz(self, patrol, fake_ptz):
         """Первый вызов handle_no_object должен: stop PTZ, reset tracker,
         выставить _is_resetting=True.
-        
+
         Замечание: _patrol_state в ОДНОМ вызове проходит 'init' → 'zooming_out',
         потому что после установки 'init' код продолжает в ветку elapsed<3.0
         и сразу вызывает zoom. Поэтому проверяем _is_resetting и stop(),
@@ -81,6 +81,33 @@ class TestHandleNoObjectInit:
         _, zoom_speed = fake_ptz.calls_of("zoom")[0]
         assert zoom_speed == -0.5
         assert len(fake_ptz.calls_of("focus")) == 1
+
+    def test_first_call_calls_goto_home(self, patrol, fake_ptz):
+        """При потере цели камера должна вернуться в home position (pan=0,tilt=0,zoom=1x)
+        перед началом патруля — чтобы не патрулировать из случайного положения."""
+        # FakePTZ не имеет goto_home — добавим заглушку
+        goto_calls = []
+        def fake_goto_home(pan=0.0, tilt=0.0, zoom=0.0):
+            goto_calls.append((pan, tilt, zoom))
+            return True
+        fake_ptz.goto_home = fake_goto_home
+
+        patrol.handle_no_object()
+        # goto_home должен быть вызван на init этапе, перед zooming_out
+        assert len(goto_calls) == 1
+        assert goto_calls[0] == (0.0, 0.0, 0.0)  # home position
+
+    def test_goto_home_failure_doesnt_break_patrol(self, patrol, fake_ptz):
+        """Если goto_home падает — patrol должен продолжить работать."""
+        def failing_goto_home(pan=0.0, tilt=0.0, zoom=0.0):
+            raise RuntimeError("Camera doesn't support AbsoluteMove")
+        fake_ptz.goto_home = failing_goto_home
+
+        # Не должно выбросить исключение
+        patrol.handle_no_object()
+        assert patrol._is_resetting is True
+        # Patrol должен продолжить — zooming_out должен сработать
+        assert patrol._patrol_state == "zooming_out"
 
 
 class TestZoomOutPhase:
