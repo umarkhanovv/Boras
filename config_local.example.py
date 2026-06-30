@@ -13,3 +13,7 @@ CAMERA_PASS = "your-camera-password"
 # Username is "admin" by default (configurable via CRANE_AUTH_USERNAME env var).
 # Choose a long random string — this is NOT the camera password.
 API_TOKEN = "your-long-random-web-panel-password"
+
+import os
+os.environ["CRANE_TELEGRAM_TOKEN"] = "CRANE_TELEGRAM_TOKEN"
+os.environ["CRANE_TELEGRAM_CHAT_ID"] = "CRANE_TELEGRAM_CHAT_ID"
